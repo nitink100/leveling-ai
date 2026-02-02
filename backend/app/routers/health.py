@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.deps.db import get_db
+from app.api.deps import get_db
 
-router = APIRouter(prefix="/api", tags=["health"])
+router = APIRouter(prefix="/api", tags=["Health"])
 
 
 @router.get("/health")
