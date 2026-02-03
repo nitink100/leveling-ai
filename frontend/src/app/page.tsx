@@ -1,131 +1,357 @@
 "use client";
 
-import { useState } from "react";
-import { createGuide } from "@/lib/api";
+import React, { useMemo, useRef, useState } from "react";
+import { createGuide, getGuideResults, getGuideStatus } from "@/lib/api";
 
-export default function Home() {
-  const [companyUrl, setCompanyUrl] = useState("");
-  const [pdf, setPdf] = useState<File | null>(null);
+type Phase = "IDLE" | "UPLOADING" | "POLLING" | "DONE" | "FAILED";
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function StatusPill({ status }: { status: string }) {
+  const s = status?.toUpperCase?.() || "UNKNOWN";
+  const tone =
+    s === "DONE"
+      ? "rgba(80, 200, 120, 0.25)"
+      : s === "FAILED"
+        ? "rgba(255, 80, 80, 0.25)"
+        : "rgba(255, 255, 255, 0.10)";
+
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "5px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        border: "1px solid rgba(255,255,255,0.18)",
+        background: tone,
+      }}
+    >
+      {s}
+    </span>
+  );
+}
+
+function CellBlock({
+  title,
+  definition,
+  examples,
+}: {
+  title: string;
+  definition: string;
+  examples: Array<{ title: string; example: string }>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const preview = useMemo(() => {
+    const txt = definition || "";
+    if (!txt) return "";
+    return txt.length > 180 ? txt.slice(0, 180) + "…" : txt;
+  }, [definition]);
+
+  return (
+    <div className="cell">
+      <div className="cellTop">
+        <div className="cellTitle">{title}</div>
+        <button className="cellBtn" onClick={() => setOpen((v) => !v)}>
+          {open ? "Collapse" : "Expand"}
+        </button>
+      </div>
+
+      <div className="cellText">{open ? definition : preview}</div>
+
+      {open && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          {(examples || []).map((ex, idx) => (
+            <div key={idx} className="exampleBlock">
+              <div className="exampleTitle">{ex.title}</div>
+              <div className="exampleText">{ex.example}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function HomePage() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [phase, setPhase] = useState<Phase>("IDLE");
+  const [err, setErr] = useState<string | null>(null);
+
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [roleTitle, setRoleTitle] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [companyContext, setCompanyContext] = useState("");
+
+  // ✅ IMPORTANT: keep selected file in state so React re-renders on file change
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+
   const [guideId, setGuideId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
 
-  async function onGenerate() {
-    setError(null);
-    setGuideId(null);
+  const [results, setResults] = useState<any>(null);
 
-    if (!companyUrl.trim()) {
-      setError("Please enter a company website URL.");
+  const canSubmit = useMemo(() => {
+    return (
+      websiteUrl.trim().length > 0 &&
+      roleTitle.trim().length > 0 &&
+      !!pdfFile &&
+      phase !== "UPLOADING" &&
+      phase !== "POLLING"
+    );
+  }, [websiteUrl, roleTitle, pdfFile, phase]);
+
+  function pickFile() {
+    fileInputRef.current?.click();
+  }
+
+  function onFilePicked(f: File | null) {
+    if (!f) {
+      setPdfFile(null);
       return;
     }
-    if (!pdf) {
-      setError("Please upload a PDF.");
+    if (f.type !== "application/pdf") {
+      setPdfFile(null);
+      setErr("Please select a PDF file.");
+      return;
+    }
+    setErr(null);
+    setPdfFile(f);
+  }
+
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    const f = e.dataTransfer.files?.[0];
+    onFilePicked(f || null);
+  }
+
+  function onDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  async function onSubmit() {
+    setErr(null);
+    setResults(null);
+
+    if (!pdfFile) {
+      setErr("Please select a PDF.");
       return;
     }
 
     try {
-      setLoading(true);
-      const res = await createGuide(companyUrl.trim(), pdf);
-      setGuideId(res.guide_id);
+      setPhase("UPLOADING");
+
+      const created = await createGuide({
+        websiteUrl: websiteUrl.trim(),
+        roleTitle: roleTitle.trim(),
+        pdfFile,
+        companyName: companyName.trim() || undefined,
+        companyContext: companyContext.trim() || undefined,
+      });
+
+      setGuideId(created.guide_id);
+      setStatus(created.status || "QUEUED");
+      setPhase("POLLING");
+
+      // Poll status until DONE/FAILED, then fetch results
+      const maxMs = 60_000; // 1 minute product expectation
+      const started = Date.now();
+
+      while (true) {
+        const st = await getGuideStatus(created.guide_id);
+        setStatus(st.status);
+
+        if (st.status === "DONE") break;
+
+        if (st.status === "FAILED") {
+          setPhase("FAILED");
+          setErr("Processing failed. Check backend logs for the failure reason.");
+          return;
+        }
+
+        if (Date.now() - started > maxMs) {
+          setPhase("FAILED");
+          setErr("Timed out waiting for results (> 60s).");
+          return;
+        }
+
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      const res = await getGuideResults(created.guide_id);
+      setResults(res);
+      setPhase("DONE");
     } catch (e: any) {
-      setError(e?.message || "Something went wrong.");
-    } finally {
-      setLoading(false);
+      setPhase("FAILED");
+      setErr(e?.message || "Something went wrong.");
     }
   }
 
-  return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700 }}>
-        Leveling Guide → Concrete Examples
-      </h1>
+  const levels = results?.levels || [];
+  const competencies = results?.competencies || [];
 
-      <p style={{ marginTop: 8, opacity: 0.8 }}>
-        Upload a leveling guide PDF and provide a company website. We’ll generate
-        3 concrete examples per competency × level.
+  const gridTemplateColumns = useMemo(() => {
+    return `260px repeat(${levels.length}, minmax(240px, 1fr))`;
+  }, [levels.length]);
+
+  return (
+    <main className="container">
+      <h1 className="title">Leveling Guide → Evidence Examples</h1>
+      <p className="subtitle">
+        Upload a leveling guide PDF and get 3 concrete examples per cell. Results should appear within ~1 minute.
       </p>
 
-      <section
-        style={{
-          marginTop: 24,
-          padding: 16,
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 600 }}>Input</h2>
-
-        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>
-              Company website
-            </span>
+      <div className="formGrid">
+        <div className="card">
+          <div className="field">
+            <label className="label">Company website URL</label>
             <input
-              type="url"
+              className="input"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
               placeholder="https://example.com"
-              value={companyUrl}
-              onChange={(e) => setCompanyUrl(e.target.value)}
-              style={{
-                padding: 10,
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
-              }}
             />
-          </label>
+          </div>
 
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>
-              Leveling guide PDF
-            </span>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label className="label">Role title</label>
             <input
+              className="input"
+              value={roleTitle}
+              onChange={(e) => setRoleTitle(e.target.value)}
+              placeholder="e.g., Backend Engineer, Data Scientist, PM"
+            />
+          </div>
+
+          <div className="field" style={{ marginTop: 12 }}>
+            <label className="label">Leveling guide PDF</label>
+
+            {/* Hidden input, pretty box UI */}
+            <input
+              ref={fileInputRef}
               type="file"
               accept="application/pdf"
-              onChange={(e) => setPdf(e.target.files?.[0] || null)}
+              style={{ display: "none" }}
+              onChange={(e) => onFilePicked(e.target.files?.[0] || null)}
             />
-          </label>
 
-          <button
-            type="button"
-            onClick={onGenerate}
-            disabled={loading}
-            style={{
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid #111827",
-              background: loading ? "#6b7280" : "#111827",
-              color: "white",
-              fontWeight: 600,
-              width: 180,
-              cursor: loading ? "not-allowed" : "pointer",
-            }}
-          >
-            {loading ? "Generating..." : "Generate"}
-          </button>
+            <div className="uploadBox" onClick={pickFile} onDrop={onDrop} onDragOver={onDragOver}>
+              <div className="uploadLeft">
+                <div className="uploadTitle">Choose a PDF</div>
+                <div className="uploadHint">Click to browse or drag & drop here</div>
+              </div>
 
-          {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+              <div className="filePill">{pdfFile ? pdfFile.name : "No file selected"}</div>
+            </div>
+          </div>
 
-          {guideId ? (
-            <p style={{ marginTop: 8 }}>
-              Created guide: <code>{guideId}</code>
-            </p>
-          ) : null}
+          <div className="field" style={{ marginTop: 12 }}>
+            <label className="label">Company name (optional)</label>
+            <input
+              className="input"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="Optional"
+            />
+          </div>
+
+          <div className="field" style={{ marginTop: 12 }}>
+            <label className="label">Company context (optional)</label>
+            <textarea
+              className="textarea"
+              value={companyContext}
+              onChange={(e) => setCompanyContext(e.target.value)}
+              placeholder="Optional: short company/product/domain context to ground examples."
+              rows={4}
+            />
+          </div>
+
+          <div className="actionsRow" style={{ marginTop: 14 }}>
+            <button className="button" disabled={!canSubmit} onClick={onSubmit}>
+              {phase === "UPLOADING" ? "Uploading…" : phase === "POLLING" ? "Processing…" : "Generate Examples"}
+            </button>
+
+            {guideId && (
+              <div className="metaRow">
+                <div style={{ fontSize: 13, opacity: 0.85 }}>Guide:</div>
+                <code style={{ fontSize: 12 }}>{guideId}</code>
+                <StatusPill status={status} />
+              </div>
+            )}
+          </div>
+
+          {err && (
+            <div className="errorBox" style={{ marginTop: 14 }}>
+              <div className="errorTitle">Error</div>
+              <div className="errorText">{err}</div>
+            </div>
+          )}
+
+          {phase === "POLLING" && (
+            <div style={{ marginTop: 12, opacity: 0.85 }}>
+              Processing… polling status every 1s (expected &lt; 60s).
+            </div>
+          )}
         </div>
-      </section>
+      </div>
 
-      <section
-        style={{
-          marginTop: 24,
-          padding: 16,
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 600 }}>Results</h2>
-        <p style={{ marginTop: 8, opacity: 0.7 }}>
-          Next: we’ll poll the backend and render the generated grid here.
-        </p>
-      </section>
+      {phase === "DONE" && results && (
+        <section className="resultsHeader">
+          <h2 style={{ fontSize: 18, fontWeight: 800 }}>Results</h2>
+          <div className="resultsMeta">
+            Prompt version: <code>{results.prompt_version}</code> • Completed:{" "}
+            <code>
+              {results.progress?.completed}/{results.progress?.expected}
+            </code>
+          </div>
+
+          <div className="tableWrap">
+            <div className="tableInner">
+              {/* Header row */}
+              <div className="tableHeaderRow" style={{ gridTemplateColumns }}>
+                <div style={{ fontWeight: 800 }}>Competency</div>
+                {levels.map((lv: any) => (
+                  <div key={lv.id} style={{ fontWeight: 800 }}>
+                    {lv.label}
+                  </div>
+                ))}
+              </div>
+
+              {/* Body rows */}
+              <div style={{ display: "grid" }}>
+                {competencies.map((comp: any) => (
+                  <div key={comp.id} className="tableBodyRow" style={{ gridTemplateColumns }}>
+                    <div style={{ fontWeight: 800, opacity: 0.95 }}>{comp.name}</div>
+
+                    {levels.map((lv: any) => {
+                      const cell = (comp.cells || []).find((c: any) => c.level_id === lv.id);
+
+                      if (!cell) {
+                        return (
+                          <div key={lv.id} style={{ opacity: 0.6, fontSize: 13 }}>
+                            No cell found
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <CellBlock
+                          key={lv.id}
+                          title="Definition + Examples"
+                          definition={cell.definition_text || ""}
+                          examples={cell.examples || []}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

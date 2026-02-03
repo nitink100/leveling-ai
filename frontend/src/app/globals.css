@@ -1,26 +1,298 @@
-@import "tailwindcss";
+/*
+  Simple, clean, dark UI.
+  Keep it CSS-only (no extra deps) so the app stays lightweight.
+*/
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #050505;
+  --panel: #0b0b0b;
+  --panel-2: #070707;
+  --text: #ffffff;
+  --muted: rgba(255, 255, 255, 0.78);
+  --border: #2a2a2a;
+  --border-2: #1a1a1a;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --accent: #ffffff;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+input,
+textarea,
+button {
+  font-family: inherit;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+}
+
+/* Layout */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 18px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: 0.2px;
+}
+
+.subtitle {
+  opacity: 0.85;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.formGrid {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+  box-shadow: 0 14px 40px var(--shadow);
+  padding: 16px;
+}
+
+/* Inputs */
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  outline: none;
+}
+
+.input:focus,
+.textarea:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 110px;
+}
+
+/* Upload box */
+.uploadBox {
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.uploadBox:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.uploadBox:active {
+  transform: translateY(1px);
+}
+
+.uploadLeft {
+  display: grid;
+  gap: 4px;
+}
+
+.uploadTitle {
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.uploadHint {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.filePill {
+  font-size: 12px;
+  opacity: 0.9;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Actions */
+.actionsRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.button {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: #000;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.button:disabled {
+  background: transparent;
+  color: var(--text);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  opacity: 0.9;
+}
+
+.errorBox {
+  padding: 12px;
+  border: 1px solid #5a1a1a;
+  border-radius: 12px;
+  background: rgba(255, 0, 0, 0.03);
+}
+
+.errorTitle {
+  font-weight: 800;
+}
+
+.errorText {
+  opacity: 0.9;
+  margin-top: 6px;
+}
+
+/* Results table */
+.resultsHeader {
+  margin-top: 26px;
+}
+
+.resultsMeta {
+  opacity: 0.85;
+  margin-top: 6px;
+}
+
+.tableWrap {
+  margin-top: 16px;
+  overflow-x: auto;
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+}
+
+.tableInner {
+  min-width: 980px;
+}
+
+.tableHeaderRow {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--panel-2);
+}
+
+.tableBodyRow {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid #111;
+}
+
+/* Cell block */
+.cell {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--panel);
+}
+
+.cellTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cellTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.cellBtn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.cellText {
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: 0.9;
+  white-space: pre-wrap;
+}
+
+.exampleBlock {
+  border-top: 1px solid var(--border-2);
+  padding-top: 10px;
+}
+
+.exampleTitle {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.exampleText {
+  font-size: 13px;
+  opacity: 0.9;
+  white-space: pre-wrap;
 }
