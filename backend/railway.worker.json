@@ -1,0 +1,11 @@
+{
+    "$schema": "https://railway.com/railway.schema.json",
+    "build": {
+      "builder": "NIXPACKS"
+    },
+    "deploy": {
+      "startCommand": "celery -A app.celery_app.celery_app worker -l info -Q extract_q,parse_q,generate_q",
+      "restartPolicyType": "ON_FAILURE"
+    }
+  }
+  
