@@ -5,6 +5,7 @@ export type GuideStatus = {
   guide_id: string;
   status: string; // QUEUED | PROCESSING | DONE | FAILED
 };
+import { getToken, clearToken } from "./auth";
 
 // Allow easy switching between local/prod.
 // In Next.js, define NEXT_PUBLIC_API_BASE_URL in .env.local
@@ -30,6 +31,20 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(apiUrl(path), { ...init, headers });
+
+  // If backend returns 401, clear token so UI forces re-login
+  if (res.status === 401) {
+    clearToken();
+  }
+  return res;
+}
+
 export async function createGuide(input: {
   websiteUrl: string;
   roleTitle: string;
@@ -45,10 +60,11 @@ export async function createGuide(input: {
   if (input.companyName) formData.append("company_name", input.companyName);
   if (input.companyContext) formData.append("company_context", input.companyContext);
 
-  const res = await fetch(apiUrl("/api/guides"), {
+  const res = await authedFetch("/api/guides", {
     method: "POST",
     body: formData,
   });
+  
 
   if (!res.ok) {
     throw new Error(await readError(res));
@@ -58,13 +74,26 @@ export async function createGuide(input: {
 }
 
 export async function getGuideStatus(guideId: string): Promise<GuideStatus> {
-  const res = await fetch(apiUrl(`/api/guides/${guideId}/status`), { cache: "no-store" });
+  const res = await authedFetch(`/api/guides/${guideId}/status`, { cache: "no-store" });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
 export async function getGuideResults(guideId: string): Promise<any> {
-  const res = await fetch(apiUrl(`/api/guides/${guideId}/results`), { cache: "no-store" });
+  const res = await authedFetch(`/api/guides/${guideId}/results`, { cache: "no-store" });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
+
+export async function loginAdmin(input: { username: string; password: string }): Promise<{ access_token: string }> {
+  // Adjust path if your backend differs
+  const res = await fetch(apiUrl("/auth/login"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+

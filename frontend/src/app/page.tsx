@@ -2,6 +2,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createGuide, getGuideResults, getGuideStatus } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { getToken } from "@/lib/auth";
+import { clearToken } from "@/lib/auth";
 
 type Phase = "IDLE" | "UPLOADING" | "POLLING" | "DONE" | "FAILED";
 
@@ -106,6 +109,13 @@ function getPollIntervalMs(elapsedMs: number) {
 }
 
 export default function HomePage() {
+  
+  const router = useRouter();
+  useEffect(() => {
+    const t = getToken();
+    if (!t) router.replace("/login");
+  }, [router]);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
@@ -352,11 +362,22 @@ export default function HomePage() {
           Upload a leveling guide PDF and generate examples per matrix cell. Multiple jobs can run in parallel.
         </div>
       </div>
+      <br></br>
+      <button
+        className="btn"
+        type="button"
+        onClick={() => {
+          clearToken();
+          router.push("/login");
+        }}
+      >
+        Logout
+      </button>
 
       {/* Form */}
       <div className="grid">
         <div className="field">
-          <label className="label">Company website URL</label>
+          <label className="label">Company website URL(mandatory)</label>
           <input
             className="input"
             value={websiteUrl}
@@ -366,7 +387,7 @@ export default function HomePage() {
         </div>
 
         <div className="field">
-          <label className="label">Role title</label>
+          <label className="label">Role title(mandatory)</label>
           <input
             className="input"
             value={roleTitle}
@@ -376,7 +397,7 @@ export default function HomePage() {
         </div>
 
         <div className="field">
-          <label className="label">Leveling guide PDF</label>
+          <label className="label">Leveling guide PDF(mandatory)</label>
 
           <div className="uploadBox">
             <div className="uploadLeft">
