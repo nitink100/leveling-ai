@@ -19,4 +19,3 @@ httpx
 celery
 redis
 python-jose
-argparse
