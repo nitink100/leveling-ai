@@ -10,8 +10,9 @@ from fastapi.responses import RedirectResponse
 from app.schemas.guide import LevelingGuideCreateResponse
 from app.services.guide_service import GuideService
 from app.api.deps import get_guide_service
+from app.auth.deps import require_admin_token
 
-router = APIRouter(prefix="/api/guides", tags=["Guides"])
+router = APIRouter(prefix="/api/guides", tags=["Guides"], dependencies=[Depends(require_admin_token)])
 
 
 @router.post("", response_model=LevelingGuideCreateResponse, status_code=status.HTTP_201_CREATED)

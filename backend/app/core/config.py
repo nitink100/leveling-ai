@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     LLM_LOG_PROMPTS: bool = False  # keep False by default (avoid leaking data)
     PROJECT_NAME : str = "LevelingAI"
 
+    CORS_ALLOW_ORIGINS: str | None = None
+    CORS_ALLOW_VERCEL_PREVIEWS: bool = False
+    
+    ADMIN_USERNAME: str
+    ADMIN_PASSWORD: str
+
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRES_MINUTES: int = 60
+
     model_config = SettingsConfigDict(
         env_file=os.path.join(PROJECT_ROOT, ".env"),
         env_file_encoding="utf-8",

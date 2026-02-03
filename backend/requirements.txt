@@ -18,3 +18,4 @@ pypdf
 httpx
 celery
 redis
+python-jose

@@ -24,3 +24,6 @@ class ErrorReason(str, Enum):
     UPLOAD_FAILED="upload failed"
     INTERNAL_ERROR= "Internal server error"
     MISSING_DEPENDENCY = "Missing dependency"
+    AUTH_REQUIRED = "Authentication required"
+    AUTH_INVALID = "Invalid authentication"
+    AUTH_FORBIDDEN = "Authentication forbidden"
