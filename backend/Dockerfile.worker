@@ -5,13 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# If you use psycopg2 (non-binary), uncomment libpq-dev.
-# If not needed, keep only build-essential or remove both.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    gcc \
-    # libpq-dev \
-  && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

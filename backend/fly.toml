@@ -1,0 +1,14 @@
+app = "leveling-ai-worker"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  CELERY_QUEUES = "extract_q,parse_q,generate_q"
+  CELERY_LOG_LEVEL = "info"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
