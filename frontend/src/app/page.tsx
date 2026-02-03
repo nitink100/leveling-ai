@@ -1,33 +1,41 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createGuide, getGuideResults, getGuideStatus } from "@/lib/api";
 
 type Phase = "IDLE" | "UPLOADING" | "POLLING" | "DONE" | "FAILED";
 
-function StatusPill({ status }: { status: string }) {
-  const s = status?.toUpperCase?.() || "UNKNOWN";
-  const tone =
-    s === "DONE"
-      ? "rgba(80, 200, 120, 0.25)"
-      : s === "FAILED"
-        ? "rgba(255, 80, 80, 0.25)"
-        : "rgba(255, 255, 255, 0.10)";
+type Example = { title: string; example: string };
+type Cell = { level_id: string; definition_text?: string; examples?: Example[] };
+type Competency = { id: string; name: string; cells?: Cell[] };
+type Level = { id: string; label: string; position: number };
 
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "5px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        border: "1px solid rgba(255,255,255,0.18)",
-        background: tone,
-      }}
-    >
-      {s}
-    </span>
-  );
+type Job = {
+  localId: string;
+  guideId: string | null;
+  createdAt: number;
+
+  websiteUrl: string;
+  roleTitle: string;
+  companyName?: string;
+  companyContext?: string;
+  fileName?: string;
+
+  phase: Phase;
+  status: string; // backend status (can be any string)
+  err: string | null;
+
+  results: any | null;
+  resultsFetched: boolean;
+
+  // for polling control
+  startedPollingAt: number | null;
+  lastPolledAt: number | null;
+};
+
+function StatusPill({ status }: { status: string }) {
+  const s = (status || "UNKNOWN").toUpperCase();
+  return <span className="pill">{s}</span>;
 }
 
 function CellBlock({
@@ -37,33 +45,29 @@ function CellBlock({
 }: {
   title: string;
   definition: string;
-  examples: Array<{ title: string; example: string }>;
+  examples: Array<Example>;
 }) {
   const [open, setOpen] = useState(false);
 
-  const preview = useMemo(() => {
-    const txt = definition || "";
-    if (!txt) return "";
-    return txt.length > 180 ? txt.slice(0, 180) + "…" : txt;
-  }, [definition]);
-
   return (
-    <div className="cell">
+    <div className="cellBlock">
       <div className="cellTop">
         <div className="cellTitle">{title}</div>
-        <button className="cellBtn" onClick={() => setOpen((v) => !v)}>
+        <button className="btn" onClick={() => setOpen((v) => !v)} type="button">
           {open ? "Collapse" : "Expand"}
         </button>
       </div>
 
-      <div className="cellText">{open ? definition : preview}</div>
+      <div className="cellText">
+        {open ? definition : `${definition}`.slice(0, 160) + (definition.length > 160 ? "…" : "")}
+      </div>
 
       {open && (
-        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
           {(examples || []).map((ex, idx) => (
-            <div key={idx} className="exampleBlock">
-              <div className="exampleTitle">{ex.title}</div>
-              <div className="exampleText">{ex.example}</div>
+            <div key={idx} className="cellExample">
+              <div className="cellExampleTitle">{ex.title}</div>
+              <div className="cellExampleText">{ex.example}</div>
             </div>
           ))}
         </div>
@@ -72,286 +76,623 @@ function CellBlock({
   );
 }
 
+function formatTime(ts: number) {
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function newLocalId() {
+  return `job_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+function isTerminalStatus(status: string) {
+  const s = (status || "").toUpperCase();
+  return s === "DONE" || s === "FAILED";
+}
+
+/**
+ * Polling schedule:
+ * - For first 10s: every 1500ms (quick feedback)
+ * - 10s–60s: every 6000ms (less aggressive, still responsive)
+ * - After 60s: every 10000ms (slow fallback if backend is slow)
+ */
+function getPollIntervalMs(elapsedMs: number) {
+  if (elapsedMs < 10_000) return 1500;
+  if (elapsedMs < 60_000) return 6000;
+  return 10_000;
+}
+
 export default function HomePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [phase, setPhase] = useState<Phase>("IDLE");
-  const [err, setErr] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [roleTitle, setRoleTitle] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [companyContext, setCompanyContext] = useState("");
 
-  // ✅ IMPORTANT: keep selected file in state so React re-renders on file change
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [activeJobLocalId, setActiveJobLocalId] = useState<string | null>(null);
 
-  const [guideId, setGuideId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>("");
-
-  const [results, setResults] = useState<any>(null);
+  const isUploading = useMemo(() => jobs.some((j) => j.phase === "UPLOADING"), [jobs]);
 
   const canSubmit = useMemo(() => {
     return (
       websiteUrl.trim().length > 0 &&
       roleTitle.trim().length > 0 &&
-      !!pdfFile &&
-      phase !== "UPLOADING" &&
-      phase !== "POLLING"
+      !!selectedFile &&
+      !isUploading
     );
-  }, [websiteUrl, roleTitle, pdfFile, phase]);
-
-  function pickFile() {
-    fileInputRef.current?.click();
-  }
-
-  function onFilePicked(f: File | null) {
-    if (!f) {
-      setPdfFile(null);
-      return;
-    }
-    if (f.type !== "application/pdf") {
-      setPdfFile(null);
-      setErr("Please select a PDF file.");
-      return;
-    }
-    setErr(null);
-    setPdfFile(f);
-  }
-
-  function onDrop(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-    const f = e.dataTransfer.files?.[0];
-    onFilePicked(f || null);
-  }
-
-  function onDragOver(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
+  }, [websiteUrl, roleTitle, selectedFile, isUploading]);
 
   async function onSubmit() {
-    setErr(null);
-    setResults(null);
+    if (!canSubmit) return;
+    const pdfFile = selectedFile;
+    if (!pdfFile) return;
 
-    if (!pdfFile) {
-      setErr("Please select a PDF.");
-      return;
-    }
+    const localId = newLocalId();
+    const now = Date.now();
+
+    const job: Job = {
+      localId,
+      guideId: null,
+      createdAt: now,
+      websiteUrl: websiteUrl.trim(),
+      roleTitle: roleTitle.trim(),
+      companyName: companyName.trim() || undefined,
+      companyContext: companyContext.trim() || undefined,
+      fileName: pdfFile.name,
+
+      phase: "UPLOADING",
+      status: "UPLOADING",
+      err: null,
+
+      results: null,
+      resultsFetched: false,
+
+      startedPollingAt: null,
+      lastPolledAt: null,
+    };
+
+    setJobs((prev) => [job, ...prev]);
+    setActiveJobLocalId(localId);
 
     try {
-      setPhase("UPLOADING");
-
       const created = await createGuide({
-        websiteUrl: websiteUrl.trim(),
-        roleTitle: roleTitle.trim(),
+        websiteUrl: job.websiteUrl,
+        roleTitle: job.roleTitle,
         pdfFile,
-        companyName: companyName.trim() || undefined,
-        companyContext: companyContext.trim() || undefined,
+        companyName: job.companyName,
+        companyContext: job.companyContext,
       });
 
-      setGuideId(created.guide_id);
-      setStatus(created.status || "QUEUED");
-      setPhase("POLLING");
+      const createdStatus = created.status || "QUEUED";
 
-      // Poll status until DONE/FAILED, then fetch results
-      const maxMs = 60_000; // 1 minute product expectation
-      const started = Date.now();
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.localId === localId
+            ? {
+                ...j,
+                guideId: created.guide_id,
+                status: createdStatus,
+                phase: isTerminalStatus(createdStatus) ? (createdStatus === "DONE" ? "DONE" : "FAILED") : "POLLING",
+                startedPollingAt: now,
+                lastPolledAt: now,
+              }
+            : j
+        )
+      );
 
-      while (true) {
-        const st = await getGuideStatus(created.guide_id);
-        setStatus(st.status);
-
-        if (st.status === "DONE") break;
-
-        if (st.status === "FAILED") {
-          setPhase("FAILED");
-          setErr("Processing failed. Check backend logs for the failure reason.");
-          return;
-        }
-
-        if (Date.now() - started > maxMs) {
-          setPhase("FAILED");
-          setErr("Timed out waiting for results (> 60s).");
-          return;
-        }
-
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-
-      const res = await getGuideResults(created.guide_id);
-      setResults(res);
-      setPhase("DONE");
+      // reset file so you can upload another immediately
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (e: any) {
-      setPhase("FAILED");
-      setErr(e?.message || "Something went wrong.");
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.localId === localId
+            ? { ...j, phase: "FAILED", status: "FAILED", err: e?.message || "Failed to create guide." }
+            : j
+        )
+      );
     }
   }
 
-  const levels = results?.levels || [];
-  const competencies = results?.competencies || [];
+  // Manual refresh for a single job (status + results if DONE)
+  async function refreshJob(localId: string) {
+    const job = jobs.find((j) => j.localId === localId);
+    if (!job?.guideId) return;
 
-  const gridTemplateColumns = useMemo(() => {
-    return `260px repeat(${levels.length}, minmax(240px, 1fr))`;
-  }, [levels.length]);
+    try {
+      const st = await getGuideStatus(job.guideId);
+      const nextStatus = st.status || job.status;
+
+      setJobs((prev) =>
+        prev.map((j) => {
+          if (j.localId !== localId) return j;
+
+          let nextPhase: Phase = j.phase;
+          if (nextStatus.toUpperCase() === "FAILED") nextPhase = "FAILED";
+          else if (nextStatus.toUpperCase() === "DONE") nextPhase = "DONE";
+          else nextPhase = "POLLING";
+
+          return { ...j, status: nextStatus, phase: nextPhase, err: null, lastPolledAt: Date.now() };
+        })
+      );
+
+      if (nextStatus.toUpperCase() === "DONE") {
+        const res = await getGuideResults(job.guideId);
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.localId === localId ? { ...j, results: res, resultsFetched: true, phase: "DONE", err: null } : j
+          )
+        );
+      }
+    } catch (e: any) {
+      setJobs((prev) =>
+        prev.map((j) => (j.localId === localId ? { ...j, err: e?.message || "Refresh failed." } : j))
+      );
+    }
+  }
+
+  /**
+   * Background polling loop:
+   * - Poll ANY job that is not DONE/FAILED and has a guideId.
+   * - Dynamic interval per job based on its elapsed time.
+   * - Keep polling until terminal or long timeout (soft).
+   *
+   * NOTE: This avoids the “polling stopped after extraction” bug because we no longer depend
+   * on the status being exactly QUEUED/PROCESSING.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const loop = async () => {
+      while (!cancelled) {
+        const now = Date.now();
+
+        const targets = jobs.filter((j) => {
+          if (!j.guideId) return false;
+          if (isTerminalStatus(j.status)) return false;
+
+          // if never started pollingAt, start it
+          const startedAt = j.startedPollingAt ?? j.createdAt;
+          const elapsed = now - startedAt;
+          const interval = getPollIntervalMs(elapsed);
+          const last = j.lastPolledAt ?? 0;
+
+          return now - last >= interval;
+        });
+
+        // Poll sequentially to avoid spiking backend; still handles multiple jobs well
+        for (const t of targets) {
+          if (cancelled) break;
+          try {
+            const st = await getGuideStatus(t.guideId!);
+            if (cancelled) break;
+
+            const nextStatus = st.status || t.status;
+            const upper = nextStatus.toUpperCase();
+
+            setJobs((prev) =>
+              prev.map((j) => {
+                if (j.localId !== t.localId) return j;
+
+                let nextPhase: Phase = j.phase;
+                if (upper === "FAILED") nextPhase = "FAILED";
+                else if (upper === "DONE") nextPhase = "DONE";
+                else nextPhase = "POLLING";
+
+                return {
+                  ...j,
+                  status: nextStatus,
+                  phase: nextPhase,
+                  err: null,
+                  startedPollingAt: j.startedPollingAt ?? j.createdAt,
+                  lastPolledAt: Date.now(),
+                };
+              })
+            );
+
+            // Auto-fetch results right away when DONE
+            if (upper === "DONE") {
+              const res = await getGuideResults(t.guideId!);
+              if (cancelled) break;
+
+              setJobs((prev) =>
+                prev.map((j) =>
+                  j.localId === t.localId ? { ...j, results: res, resultsFetched: true, phase: "DONE", err: null } : j
+                )
+              );
+            }
+          } catch (e: any) {
+            const msg = e?.message || "Polling error";
+            setJobs((prev) =>
+              prev.map((j) =>
+                j.localId === t.localId ? { ...j, err: msg, lastPolledAt: Date.now() } : j
+              )
+            );
+          }
+        }
+
+        // Sleep a bit before next scan; small to keep loop responsive
+        await new Promise((r) => setTimeout(r, 750));
+      }
+    };
+
+    // Only run if there is at least one non-terminal job
+    const hasLive = jobs.some((j) => j.guideId && !isTerminalStatus(j.status));
+    if (hasLive) loop();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobs]);
+
+  const inProgress = jobs.filter((j) => j.guideId && !isTerminalStatus(j.status));
+  const completed = jobs.filter((j) => j.guideId && j.status.toUpperCase() === "DONE");
+  const failed = jobs.filter((j) => j.guideId && j.status.toUpperCase() === "FAILED");
+
+  const activeJob = useMemo(() => {
+    if (!activeJobLocalId) return null;
+    return jobs.find((j) => j.localId === activeJobLocalId) || null;
+  }, [jobs, activeJobLocalId]);
+
+  const results = activeJob?.results || null;
+  const levels: Level[] = results?.levels || [];
+  const competencies: Competency[] = results?.competencies || [];
 
   return (
     <main className="container">
-      <h1 className="title">Leveling Guide → Evidence Examples</h1>
-      <p className="subtitle">
-        Upload a leveling guide PDF and get 3 concrete examples per cell. Results should appear within ~1 minute.
-      </p>
+      <div>
+        <div className="title">Leveling Guide → Evidence Examples</div>
+        <div className="subtitle">
+          Upload a leveling guide PDF and generate examples per matrix cell. Multiple jobs can run in parallel.
+        </div>
+      </div>
 
-      <div className="formGrid">
-        <div className="card">
-          <div className="field">
-            <label className="label">Company website URL</label>
-            <input
-              className="input"
-              value={websiteUrl}
-              onChange={(e) => setWebsiteUrl(e.target.value)}
-              placeholder="https://example.com"
-            />
-          </div>
+      {/* Form */}
+      <div className="grid">
+        <div className="field">
+          <label className="label">Company website URL</label>
+          <input
+            className="input"
+            value={websiteUrl}
+            onChange={(e) => setWebsiteUrl(e.target.value)}
+            placeholder="https://example.com"
+          />
+        </div>
 
-          <div className="field" style={{ marginTop: 12 }}>
-            <label className="label">Role title</label>
-            <input
-              className="input"
-              value={roleTitle}
-              onChange={(e) => setRoleTitle(e.target.value)}
-              placeholder="e.g., Backend Engineer, Data Scientist, PM"
-            />
-          </div>
+        <div className="field">
+          <label className="label">Role title</label>
+          <input
+            className="input"
+            value={roleTitle}
+            onChange={(e) => setRoleTitle(e.target.value)}
+            placeholder="e.g., Backend Engineer, Data Scientist, Product Manager"
+          />
+        </div>
 
-          <div className="field" style={{ marginTop: 12 }}>
-            <label className="label">Leveling guide PDF</label>
+        <div className="field">
+          <label className="label">Leveling guide PDF</label>
 
-            {/* Hidden input, pretty box UI */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf"
-              style={{ display: "none" }}
-              onChange={(e) => onFilePicked(e.target.files?.[0] || null)}
-            />
+          <div className="uploadBox">
+            <div className="uploadLeft">
+              <div className="fileName">{selectedFile ? selectedFile.name : "No file selected"}</div>
+              <div className="small">PDF only</div>
+            </div>
 
-            <div className="uploadBox" onClick={pickFile} onDrop={onDrop} onDragOver={onDragOver}>
-              <div className="uploadLeft">
-                <div className="uploadTitle">Choose a PDF</div>
-                <div className="uploadHint">Click to browse or drag & drop here</div>
-              </div>
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              <input
+                ref={fileInputRef}
+                className="hiddenFile"
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+              />
 
-              <div className="filePill">{pdfFile ? pdfFile.name : "No file selected"}</div>
+              <button className="btn" onClick={() => fileInputRef.current?.click()} type="button">
+                Choose PDF
+              </button>
+
+              {selectedFile && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setSelectedFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  type="button"
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
+        </div>
 
-          <div className="field" style={{ marginTop: 12 }}>
-            <label className="label">Company name (optional)</label>
-            <input
-              className="input"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Optional"
-            />
+        <div className="field">
+          <label className="label">Company name (optional)</label>
+          <input
+            className="input"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+
+        <div className="field">
+          <label className="label">Company context (optional)</label>
+          <textarea
+            className="textarea"
+            value={companyContext}
+            onChange={(e) => setCompanyContext(e.target.value)}
+            placeholder="Optional: short description of the product/domain to ground examples."
+            rows={4}
+          />
+        </div>
+
+        <div className="row">
+          <button
+            className={`btn ${canSubmit ? "btnPrimary" : ""}`}
+            disabled={!canSubmit}
+            onClick={onSubmit}
+            type="button"
+          >
+            {isUploading ? "Uploading…" : "Generate Examples"}
+          </button>
+
+          <div className="muted" style={{ fontSize: 13 }}>
+            Polling is adaptive (fast first, then 5–10s).
           </div>
+        </div>
+      </div>
 
-          <div className="field" style={{ marginTop: 12 }}>
-            <label className="label">Company context (optional)</label>
-            <textarea
-              className="textarea"
-              value={companyContext}
-              onChange={(e) => setCompanyContext(e.target.value)}
-              placeholder="Optional: short company/product/domain context to ground examples."
-              rows={4}
-            />
+      {/* Jobs */}
+      <div style={{ marginTop: 22 }} className="card">
+        <div className="cardHeader">
+          <div>Jobs</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Click “View” to open job + “Refresh” to force status/results now
           </div>
+        </div>
 
-          <div className="actionsRow" style={{ marginTop: 14 }}>
-            <button className="button" disabled={!canSubmit} onClick={onSubmit}>
-              {phase === "UPLOADING" ? "Uploading…" : phase === "POLLING" ? "Processing…" : "Generate Examples"}
-            </button>
+        <div className="cardBody">
+          {jobs.length === 0 ? (
+            <div className="muted" style={{ fontSize: 13 }}>No jobs yet.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>In progress</div>
+                {inProgress.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 13 }}>None</div>
+                ) : (
+                  <div className="jobsGrid">
+                    {inProgress.map((j) => (
+                      <div key={j.localId} className="jobItem">
+                        <div className="jobMeta">
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{j.roleTitle}</div>
+                            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                              {j.fileName || "PDF"} • {formatTime(j.createdAt)}
+                            </div>
+                            {j.guideId && <div className="code" style={{ marginTop: 6 }}>{j.guideId}</div>}
+                            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                              Last polled: {j.lastPolledAt ? formatTime(j.lastPolledAt) : "—"}
+                            </div>
+                          </div>
 
-            {guideId && (
-              <div className="metaRow">
-                <div style={{ fontSize: 13, opacity: 0.85 }}>Guide:</div>
-                <code style={{ fontSize: 12 }}>{guideId}</code>
-                <StatusPill status={status} />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                            <StatusPill status={j.status} />
+                            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                              <button className="btn" type="button" onClick={() => setActiveJobLocalId(j.localId)}>
+                                View
+                              </button>
+                              <button className="btn" type="button" onClick={() => refreshJob(j.localId)}>
+                                Refresh
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {j.err && (
+                          <div style={{ marginTop: 10 }} className="errorBox">
+                            <div style={{ fontWeight: 700 }}>Warning</div>
+                            <div style={{ opacity: 0.9, marginTop: 6 }}>{j.err}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {err && (
-            <div className="errorBox" style={{ marginTop: 14 }}>
-              <div className="errorTitle">Error</div>
-              <div className="errorText">{err}</div>
-            </div>
-          )}
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Completed</div>
+                {completed.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 13 }}>None</div>
+                ) : (
+                  <div className="jobsGrid">
+                    {completed.map((j) => (
+                      <div key={j.localId} className="jobItem">
+                        <div className="jobMeta">
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{j.roleTitle}</div>
+                            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                              {j.fileName || "PDF"} • {formatTime(j.createdAt)}
+                            </div>
+                            {j.guideId && <div className="code" style={{ marginTop: 6 }}>{j.guideId}</div>}
+                          </div>
 
-          {phase === "POLLING" && (
-            <div style={{ marginTop: 12, opacity: 0.85 }}>
-              Processing… polling status every 1s (expected &lt; 60s).
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                            <StatusPill status={j.status} />
+                            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                              <button
+                                className={`btn ${activeJobLocalId === j.localId ? "btnPrimary" : ""}`}
+                                type="button"
+                                onClick={() => setActiveJobLocalId(j.localId)}
+                              >
+                                {activeJobLocalId === j.localId ? "Showing" : "Show Results"}
+                              </button>
+                              <button className="btn" type="button" onClick={() => refreshJob(j.localId)}>
+                                Refresh
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {j.err && (
+                          <div style={{ marginTop: 10 }} className="errorBox">
+                            <div style={{ fontWeight: 700 }}>Note</div>
+                            <div style={{ opacity: 0.9, marginTop: 6 }}>{j.err}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Failed</div>
+                {failed.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 13 }}>None</div>
+                ) : (
+                  <div className="jobsGrid">
+                    {failed.map((j) => (
+                      <div key={j.localId} className="jobItem">
+                        <div className="jobMeta">
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{j.roleTitle}</div>
+                            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                              {j.fileName || "PDF"} • {formatTime(j.createdAt)}
+                            </div>
+                            {j.guideId && <div className="code" style={{ marginTop: 6 }}>{j.guideId}</div>}
+                          </div>
+
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                            <StatusPill status={j.status} />
+                            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                              <button className="btn" type="button" onClick={() => setActiveJobLocalId(j.localId)}>
+                                View
+                              </button>
+                              <button className="btn" type="button" onClick={() => refreshJob(j.localId)}>
+                                Refresh
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {j.err && (
+                          <div style={{ marginTop: 10 }} className="errorBox">
+                            <div style={{ fontWeight: 700 }}>Error</div>
+                            <div style={{ opacity: 0.9, marginTop: 6 }}>{j.err}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {phase === "DONE" && results && (
-        <section className="resultsHeader">
-          <h2 style={{ fontSize: 18, fontWeight: 800 }}>Results</h2>
-          <div className="resultsMeta">
-            Prompt version: <code>{results.prompt_version}</code> • Completed:{" "}
-            <code>
-              {results.progress?.completed}/{results.progress?.expected}
-            </code>
+      {/* Results */}
+      <div style={{ marginTop: 22 }} className="card">
+        <div className="cardHeader">
+          <div>Results</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            {activeJob ? `Active: ${activeJob.roleTitle} • ${activeJob.status}` : "Select a job"}
           </div>
+        </div>
 
-          <div className="tableWrap">
-            <div className="tableInner">
-              {/* Header row */}
-              <div className="tableHeaderRow" style={{ gridTemplateColumns }}>
-                <div style={{ fontWeight: 800 }}>Competency</div>
-                {levels.map((lv: any) => (
-                  <div key={lv.id} style={{ fontWeight: 800 }}>
-                    {lv.label}
-                  </div>
-                ))}
-              </div>
-
-              {/* Body rows */}
-              <div style={{ display: "grid" }}>
-                {competencies.map((comp: any) => (
-                  <div key={comp.id} className="tableBodyRow" style={{ gridTemplateColumns }}>
-                    <div style={{ fontWeight: 800, opacity: 0.95 }}>{comp.name}</div>
-
-                    {levels.map((lv: any) => {
-                      const cell = (comp.cells || []).find((c: any) => c.level_id === lv.id);
-
-                      if (!cell) {
-                        return (
-                          <div key={lv.id} style={{ opacity: 0.6, fontSize: 13 }}>
-                            No cell found
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <CellBlock
-                          key={lv.id}
-                          title="Definition + Examples"
-                          definition={cell.definition_text || ""}
-                          examples={cell.examples || []}
-                        />
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
+        <div className="cardBody">
+          {!activeJob ? (
+            <div className="muted" style={{ fontSize: 13 }}>Pick a job above.</div>
+          ) : activeJob.status.toUpperCase() !== "DONE" ? (
+            <div className="muted" style={{ fontSize: 13 }}>
+              Not DONE yet. Status: <b>{activeJob.status}</b> •{" "}
+              <button className="btn" type="button" onClick={() => refreshJob(activeJob.localId)}>
+                Refresh now
+              </button>
             </div>
-          </div>
-        </section>
-      )}
+          ) : !results ? (
+            <div className="muted" style={{ fontSize: 13 }}>
+              DONE but results not loaded yet. Click{" "}
+              <button className="btn" type="button" onClick={() => refreshJob(activeJob.localId)}>
+                Refresh
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                Prompt version: <span className="code">{results.prompt_version}</span> • Completed:{" "}
+                <span className="code">
+                  {results.progress?.completed}/{results.progress?.expected}
+                </span>
+              </div>
+
+              <div className="matrixWrap">
+                <div className="matrixMinWidth">
+                  <div
+                    className="matrixHeaderRow"
+                    style={{
+                      gridTemplateColumns: `260px repeat(${levels.length}, minmax(240px, 1fr))`,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>Competency</div>
+                    {levels.map((lv) => (
+                      <div key={lv.id} style={{ fontWeight: 700 }}>
+                        {lv.label}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "grid", gap: 0 }}>
+                    {competencies.map((comp) => (
+                      <div
+                        key={comp.id}
+                        className="matrixRow"
+                        style={{
+                          gridTemplateColumns: `260px repeat(${levels.length}, minmax(240px, 1fr))`,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, opacity: 0.95 }}>{comp.name}</div>
+
+                        {levels.map((lv) => {
+                          const cell = (comp.cells || []).find((c) => c.level_id === lv.id);
+                          if (!cell) {
+                            return (
+                              <div key={lv.id} style={{ opacity: 0.6, fontSize: 13 }}>
+                                No cell found
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <CellBlock
+                              key={lv.id}
+                              title="Definition + Examples"
+                              definition={cell.definition_text || ""}
+                              examples={cell.examples || []}
+                            />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {results?.notes && <div style={{ marginTop: 12 }} className="muted">Notes: {results.notes}</div>}
+            </div>
+          )}
+        </div>
+      </div>
     </main>
   );
 }
