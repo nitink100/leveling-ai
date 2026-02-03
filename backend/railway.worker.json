@@ -4,8 +4,7 @@
       "builder": "NIXPACKS"
     },
     "deploy": {
-      "startCommand": "celery -A app.celery_app.celery_app worker -l info -Q extract_q,parse_q,generate_q",
+      "startCommand": "celery -A app.celery_app.celery_app worker -l info -Q extract_q,parse_q,generate_q --uid=nobody",
       "restartPolicyType": "ON_FAILURE"
     }
-  }
-  
+}
