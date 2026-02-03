@@ -5,7 +5,7 @@ of truth for DATABASE_URL, so Alembic always migrates the same database your
 app runs against.
 """
 
-from __future__ import annotations
+
 
 from logging.config import fileConfig
 

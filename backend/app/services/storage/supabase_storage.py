@@ -5,7 +5,7 @@ supabase_storage.py
 - Design: Treat as an infrastructure adapter; no business logic.
 """
 
-from __future__ import annotations
+
 
 import os
 import uuid
@@ -45,7 +45,7 @@ class SupabaseStorage:
                 code=ErrorCode.CONFIG_ERROR,
                 reason=ErrorReason.MISSING_DEPENDENCY,
                 message="Supabase client library is not installed or failed to import",
-                http_status=500,
+                status_code=500,
             ) from e
 
         self._client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
@@ -82,7 +82,7 @@ class SupabaseStorage:
                 code=ErrorCode.VALIDATION_ERROR,
                 reason=ErrorReason.INVALID_INPUT,
                 message="Failed to read uploaded PDF file",
-                http_status=400,
+                status_code=400,
             ) from e
 
         try:
@@ -94,8 +94,8 @@ class SupabaseStorage:
             raise AppError(
                 code=ErrorCode.STORAGE_ERROR,
                 reason=ErrorReason.UPLOAD_FAILED,
-                message="Failed to upload PDF to storage",
-                http_status=500,
+                message=f"Failed to upload PDF to storage:{e}",
+                status_code=500,
             ) from e
 
         # Some versions return dict-like, some return object; we just assume no exception == success.
@@ -112,7 +112,7 @@ class SupabaseStorage:
                 code=ErrorCode.STORAGE_ERROR,
                 reason=ErrorReason.SIGNED_URL_FAILED,
                 message="Failed to create signed download URL",
-                http_status=500,
+                status_code=500,
             ) from e
 
         # Supabase returns a dict with signedURL in many client versions
@@ -129,5 +129,70 @@ class SupabaseStorage:
             code=ErrorCode.STORAGE_ERROR,
             reason=ErrorReason.SIGNED_URL_FAILED,
             message="Signed URL response was not in the expected format",
-            http_status=500,
+            status_code=500,
         )
+    
+    def download_bytes(self, obj: StoredObject, expires_in_seconds: int = 600) -> bytes:
+        """Download a private object as bytes using a signed URL."""
+        url = self.create_signed_download_url(obj, expires_in_seconds=expires_in_seconds)
+
+        try:
+            import httpx
+
+            with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                resp = client.get(url)
+                resp.raise_for_status()
+                return resp.content
+        except Exception as e:
+            raise AppError(
+                code=ErrorCode.STORAGE_ERROR,
+                reason=ErrorReason.DOWNLOAD_FAILED,
+                message="Failed to download object from storage",
+                status_code=500,
+            ) from e
+
+    def upload_text(self, obj: StoredObject, text: str, content_type: str = "text/plain") -> StoredObject:
+        """Upload plain text to storage under the provided object path."""
+        data = text.encode("utf-8")
+
+        try:
+            # Variant A (common): upload(path, file, file_options)
+            # file_options is NOT headers; it can include content-type and upsert.
+            self._client.storage.from_(obj.bucket).upload(
+                path=obj.path,
+                file=data,
+                file_options={"content-type": content_type, "upsert": "true"},
+            )
+            return obj
+
+        except TypeError:
+            # Variant B (older): upload(path, file, options_dict) but options are treated like headers.
+            # In this case, you cannot upsert via headers. Use update() instead.
+            try:
+                # Try upload without upsert (first-time write)
+                self._client.storage.from_(obj.bucket).upload(obj.path, data, {"content-type": content_type})
+                return obj
+            except Exception:
+                # If it already exists, fall back to update
+                try:
+                    self._client.storage.from_(obj.bucket).update(
+                        path=obj.path,
+                        file=data,
+                        file_options={"content-type": content_type},
+                    )
+                    return obj
+                except Exception as e:
+                    raise AppError(
+                        code=ErrorCode.STORAGE_ERROR,
+                        reason=ErrorReason.UPLOAD_FAILED,
+                        message=f"Failed to upload text artifact to storage: {e}",
+                        status_code=500,
+                    ) from e
+
+        except Exception as e:
+            raise AppError(
+                code=ErrorCode.STORAGE_ERROR,
+                reason=ErrorReason.UPLOAD_FAILED,
+                message=f"Failed to upload text artifact to storage: {e}",
+                status_code=500,
+            ) from e

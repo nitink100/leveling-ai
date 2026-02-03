@@ -1,17 +1,16 @@
-"""
-statuses.py
-- Purpose: Central source of truth for pipeline statuses.
-- Design: Keep FE-facing statuses stable and explicit.
-"""
-
 from enum import Enum
 
-
 class GuideStatus(str, Enum):
-    UPLOADED = "UPLOADED"
     QUEUED = "QUEUED"
-    RUNNING_EXTRACT = "RUNNING_EXTRACT"
-    RUNNING_PARSE = "RUNNING_PARSE"
-    RUNNING_GENERATE = "RUNNING_GENERATE"
-    READY = "READY"
-    FAILED = "FAILED"
+
+    EXTRACTING_TEXT = "EXTRACTING_TEXT"
+    TEXT_EXTRACTED = "TEXT_EXTRACTED"
+    FAILED_BAD_PDF = "FAILED_BAD_PDF"
+
+    PARSING_MATRIX = "PARSING_MATRIX"
+    MATRIX_PARSED = "MATRIX_PARSED"
+    FAILED_PARSE = "FAILED_PARSE"
+
+    GENERATING_EXAMPLES = "GENERATING_EXAMPLES"
+    DONE = "DONE"
+    FAILED_GENERATION = "FAILED_GENERATION"

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Observability
     LLM_LOG_PROMPTS: bool = False  # keep False by default (avoid leaking data)
+    PROJECT_NAME : str = "LevelingAI"
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(PROJECT_ROOT, ".env"),

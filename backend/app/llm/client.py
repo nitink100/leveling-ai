@@ -1,5 +1,5 @@
 # app/llm/client.py
-from __future__ import annotations
+
 
 import uuid
 import time
@@ -42,6 +42,12 @@ def llm_generate(
     safe_vars = dict(variables)
     safe_vars.setdefault("__REPAIR_INSTRUCTIONS__", "")
 
+    # Adjust max tokens for specific purposes
+    max_tokens = settings.LLM_MAX_OUTPUT_TOKENS
+    if purpose == "parse_matrix":
+        max_tokens = max(max_tokens, 8192)
+
+
     req = LLMRequest(
         trace_id=trace_id,
         purpose=purpose,
@@ -51,7 +57,7 @@ def llm_generate(
         provider="gemini",
         model=settings.GEMINI_MODEL,
         temperature=settings.LLM_TEMPERATURE,
-        max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
+        max_output_tokens=max_tokens,
         timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
         response_mime_type=response_mime_type,
     )
@@ -160,7 +166,11 @@ def llm_generate_structured(
     except (json.JSONDecodeError, ValidationError):
         repaired_vars = dict(variables)
         repaired_vars["__REPAIR_INSTRUCTIONS__"] = (
-            "Return ONLY valid JSON that matches the schema. No markdown, no extra keys."
+            "You MUST return valid JSON only. "
+            "Escape all quotes and newlines inside strings. "
+            "Do not include any raw line breaks inside string values. "
+            "No markdown. No trailing commas. "
+            "Return EXACTLY the schema with correct types."
         )
 
         resp2 = llm_generate(

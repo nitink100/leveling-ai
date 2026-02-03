@@ -1,5 +1,5 @@
 # app/llm/providers/gemini.py
-from __future__ import annotations
+
 
 import time
 from dataclasses import dataclass

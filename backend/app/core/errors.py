@@ -22,12 +22,14 @@ class AppError(Exception):
     reason: str
     status_code: int = http_status.HTTP_400_BAD_REQUEST
     details: dict[str, Any] | None = None
+    message: str | None = None  # Optional human-readable message
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "error": {
                 "code": self.code,
                 "reason": self.reason,
+                "message": self.message if self.message else self.reason,
             }
         }
         if self.details:

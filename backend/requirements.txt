@@ -12,3 +12,9 @@ httpx
 pytest-asyncio
 requests
 google-genai
+pymupdf
+pdfplumber
+pypdf
+httpx
+celery
+redis

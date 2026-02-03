@@ -21,3 +21,6 @@ class ErrorReason(str, Enum):
     STORAGE_UNAVAILABLE = "Storage unavailable"
     PDF_INVALID = "Invalid PDF"
     LLM_FAILED = "LLM request failed"
+    UPLOAD_FAILED="upload failed"
+    INTERNAL_ERROR= "Internal server error"
+    MISSING_DEPENDENCY = "Missing dependency"

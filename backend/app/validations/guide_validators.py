@@ -7,7 +7,7 @@ guide_validators.py
 from urllib.parse import urlparse
 from app.core import AppError, ErrorCode, ErrorReason
 from app.core.error_codes import ErrorCode
-
+import re
 
 def validate_role_title(role_title: str) -> None:
     rt = (role_title or "").strip()
@@ -26,6 +26,6 @@ def normalize_website_url(url: str) -> str:
     parsed = urlparse(u)
 
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise AppError(code=ErrorCode.GUIDE_INVALID_URL, status_code=422)
+        raise AppError(code=ErrorCode.COMPANY_INVALID_URL, status_code=422, reason=ErrorReason.INVALID_INPUT)
 
     return f"{parsed.scheme}://{parsed.netloc.lower()}".rstrip("/")

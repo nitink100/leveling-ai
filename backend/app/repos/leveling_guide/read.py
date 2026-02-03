@@ -6,7 +6,7 @@ leveling_guide/read.py
 
 from sqlalchemy.orm import Session
 from app.models.leveling_guide import LevelingGuide
-
+from app.models.guide_artifact import GuideArtifact
 
 class LevelingGuideReadRepo:
     def __init__(self, db: Session):
@@ -32,3 +32,12 @@ class LevelingGuideReadRepo:
             .limit(limit)
             .all()
         )
+
+    def get_artifact(self, guide_id: str, type: str) -> GuideArtifact | None:
+        return (
+            self.db.query(GuideArtifact)
+            .filter(GuideArtifact.guide_id == guide_id, GuideArtifact.type == type)
+            .order_by(GuideArtifact.created_at.desc())
+            .first()
+        )
+

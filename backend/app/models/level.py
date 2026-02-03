@@ -23,7 +23,7 @@ class Level(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     guide_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("leveling_guides.id"), nullable=False)
 
-    code: Mapped[str] = mapped_column(String(32), nullable=False)   # L1, L2, Senior...
+    code: Mapped[str] = mapped_column(String(64), nullable=False)   # L1, L2, Senior...
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

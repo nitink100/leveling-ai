@@ -27,9 +27,7 @@ class LevelingGuideCreateResponse(BaseModel):
     """
     guide_id: UUID
     company_id: UUID
-    status: Literal[
-        "UPLOADED", "QUEUED", "RUNNING_EXTRACT", "RUNNING_PARSE", "RUNNING_GENERATE", "READY", "FAILED"
-    ]
+    status: GuideStatus
     status_url: str
     results_url: str
     pdf_url: str
