@@ -1,4 +1,4 @@
-````md
+
 # Leveling AI — “Make promotions concrete” (Founding Engineer Interview Project)
 
 A prototype web app where a manager can upload a **role leveling guide (PDF)** + provide a **company website**, and the system generates **3 concrete examples per cell** in the leveling matrix so direct reports can understand *what “operating at that level” actually looks like*.
@@ -53,20 +53,20 @@ This repo is intentionally designed as a **fast, explainable pipeline**:
 
 ```mermaid
 flowchart LR
-  A[Next.js UI] -->|POST /auth/login| B[FastAPI]
-  A -->|POST /api/guides (multipart: pdf + fields)| B
+  A[Next.js UI] -->|"POST /auth/login"| B[FastAPI]
+  A -->|"POST /api/guides (multipart: pdf + fields)"| B
 
   B -->|Store metadata| D[(Postgres - Supabase)]
-  B -->|Upload PDF (private)| E[Supabase Storage]
+  B -->|"Upload PDF (private)"| E[Supabase Storage]
   B -->|enqueue| C[Redis Broker]
   C --> F[Celery Worker]
 
-  F -->|Phase 2: extract text| D
-  F -->|Phase 3: parse matrix| D
-  F -->|Phase 4: generate examples| D
+  F -->|"Phase 2: extract text"| D
+  F -->|"Phase 3: parse matrix"| D
+  F -->|"Phase 4: generate examples"| D
 
-  A -->|poll GET /api/guides/:id/status| B
-  A -->|GET /api/guides/:id/results| B
+  A -->|"poll GET /api/guides/:id/status"| B
+  A -->|"GET /api/guides/:id/results"| B
   B --> D
 ````
 
@@ -595,7 +595,5 @@ This makes future features straightforward:
 # If I had more time (1–4 sentences)
 
 I’d add migrations (Alembic) + a proper auth model (multi-user sessions), implement background job observability (task traces + retries surfaced in UI), add evaluation harnesses for LLM outputs (schema checks + rubric scoring), and containerize with Docker Compose for one-command local setup and easy deployment.
-
-```
 ::contentReference[oaicite:0]{index=0}
 ```
