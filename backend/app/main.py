@@ -24,41 +24,23 @@ def _split_csv(value: str | None) -> list[str]:
 def create_app() -> FastAPI:
     app = FastAPI(title=getattr(settings, "PROJECT_NAME", "API"))
 
-    app.add_middleware(RequestLoggingMiddleware)
-
-    # ---- CORS (env-driven) ----
-    # Recommended env var:
-    # CORS_ALLOW_ORIGINS="http://localhost:3000,https://yourapp.vercel.app"
+    # 1. Define CORS logic first
     allow_origins = _split_csv(getattr(settings, "CORS_ALLOW_ORIGINS", None))
-
-    # Optional: allow all Vercel preview deployments
-    # Set to "true" only if you want previews to work without manual allowlisting.
-    allow_vercel_previews = bool(getattr(settings, "CORS_ALLOW_VERCEL_PREVIEWS", False))
+    if not allow_origins:
+        allow_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     cors_kwargs = dict(
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    if allow_vercel_previews:
-        # Allows https://<anything>.vercel.app
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
-            **cors_kwargs,
-        )
-    else:
-        # If you use cookies/credentials, do NOT use "*"
-        # If allow_origins is empty, default to localhost only.
-        if not allow_origins:
-            allow_origins = ["http://localhost:3000"]
+    # 2. ADD CORS MIDDLEWARE FIRST (so it is the last to wrap the app)
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allow_origins,
-            **cors_kwargs,
-        )
+    # 3. ADD OTHER MIDDLEWARES AFTER
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Exception handlers
     app.add_exception_handler(AppError, app_error_handler)

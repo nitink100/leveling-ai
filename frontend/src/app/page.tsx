@@ -474,9 +474,9 @@ export default function HomePage() {
       {/* Jobs */}
       <div style={{ marginTop: 22 }} className="card">
         <div className="cardHeader">
-          <div>Jobs</div>
+          <div>Guides</div>
           <div className="muted" style={{ fontSize: 13 }}>
-            Click “View” to open job + “Refresh” to force status/results now
+            Click “View” to open Guide + “Refresh” to force status/results now
           </div>
         </div>
 
@@ -627,7 +627,7 @@ export default function HomePage() {
         <div className="cardHeader">
           <div>Results</div>
           <div className="muted" style={{ fontSize: 13 }}>
-            {activeJob ? `Active: ${activeJob.roleTitle} • ${activeJob.status}` : "Select a job"}
+            {activeJob ? `Active: ${activeJob.roleTitle} • ${activeJob.status}` : "Select a Guide"}
           </div>
         </div>
 
