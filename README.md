@@ -10,14 +10,6 @@ This repo is intentionally designed as a **fast, explainable pipeline**:
 
 ---
 
-## Live demo
-- **Frontend (Vercel):** _add your Vercel link here_
-- **Backend API:** _add your backend link here_
-
-> Note: the public demo requires the backend to be running (API + Celery workers + Redis + DB). If the backend is down, uploads and generation won’t work.
-
----
-
 ## What is a “leveling guide”?
 A **leveling guide** (also called a **career ladder** or **promotion rubric**) is typically a matrix that describes expectations across levels (e.g., L1 → L5).
 
